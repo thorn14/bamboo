@@ -1,0 +1,11 @@
+default_shell = "/bin/zsh"                                                                                                                                           
+  layout = "Scroll"  # or "Fixed"                                                                                                                                      
+                                                                                                                                                                       
+  [[panes]]
+  name = "Agent"
+  command = "claude"
+  cwd = "~/git/bamboo"
+
+  [[panes]]
+  name = "Shell"
+  # no command = interactive shell
