@@ -12,7 +12,7 @@ use crate::app::AppState;
 use crate::config::PaneConfig;
 use crate::pane::Pane;
 use crate::pty::{self, PtyEvent};
-use crate::ui;
+use crate::ui::{self, FOOTER_HEIGHT};
 
 pub enum AppEvent {
     Terminal(CrosstermEvent),
@@ -234,7 +234,7 @@ fn handle_mouse_event(mouse: MouseEvent, app: &mut AppState) {
                 .last()
                 .map(|(idx, _)| *idx + 1 < app.panes.len())
                 .unwrap_or(false);
-            if has_below && row == app.term_rows.saturating_sub(1) {
+            if has_below && row == app.term_rows.saturating_sub(1 + FOOTER_HEIGHT) {
                 app.page_viewport_down();
                 return;
             }

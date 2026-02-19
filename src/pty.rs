@@ -46,7 +46,9 @@ pub fn spawn_pty(
         cmd.arg(arg);
     }
 
-    if let Some(cwd) = Config::resolve_cwd(&pane_config.cwd) {
+    let cwd = Config::resolve_cwd(&pane_config.cwd)
+        .or_else(|| std::env::current_dir().ok());
+    if let Some(cwd) = cwd {
         cmd.cwd(cwd);
     }
 

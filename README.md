@@ -4,6 +4,8 @@ A terminal multiplexer TUI written in Rust. Run multiple terminal panes stacked 
 
 Why called bamboo? Because the vertical resembles the nodes of a shoot. 
 
+I often find myself with multiple tabs open just to run a dev server and build changes. Tack on an agent cli and things get overwhelming across the 3-4 repos I regularly contribute to.
+
 ## Install
 
 ```sh

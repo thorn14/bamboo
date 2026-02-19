@@ -10,40 +10,98 @@ use crate::pane::Pane;
 const COLLAPSED_HEIGHT: u16 = 3;
 const MIN_EXPANDED_HEIGHT: u16 = 5;
 const INDICATOR_HEIGHT: u16 = 1;
+pub const FOOTER_HEIGHT: u16 = 1;
 
 pub fn render(frame: &mut Frame, app: &mut AppState) {
-    let area = frame.area();
-    if area.height == 0 || area.width == 0 {
+    let full_area = frame.area();
+    if full_area.height == 0 || full_area.width == 0 {
         return;
     }
 
-    ensure_focused_visible(app, area.height);
+    let pane_area = Rect::new(
+        full_area.x,
+        full_area.y,
+        full_area.width,
+        full_area.height.saturating_sub(FOOTER_HEIGHT),
+    );
+    let footer_area = Rect::new(
+        full_area.x,
+        full_area.y + pane_area.height,
+        full_area.width,
+        FOOTER_HEIGHT,
+    );
+
+    ensure_focused_visible(app, pane_area.height);
 
     let above_count = app.viewport_start;
-    let (layout, visible_end) = compute_visible_layout(app, area);
+    let (layout, visible_end) = compute_visible_layout(app, pane_area);
     let below_count = app.panes.len().saturating_sub(visible_end);
 
     app.last_pane_areas = layout.clone();
 
     let focused = app.focused;
-    for &(pane_idx, pane_area) in &layout {
+    for &(pane_idx, pa) in &layout {
         let is_focused = pane_idx == focused;
         let pane = &mut app.panes[pane_idx];
-        render_pane(frame, pane, pane_area, is_focused);
+        render_pane(frame, pane, pa, is_focused);
     }
 
     let buf = frame.buffer_mut();
     if above_count > 0 {
         let msg = format!(" ▲ {} more above ", above_count);
         let style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-        buf.set_string(area.x, area.y, &msg, style);
+        buf.set_string(pane_area.x, pane_area.y, &msg, style);
     }
 
     if below_count > 0 {
         let msg = format!(" ▼ {} more below ", below_count);
         let style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-        let y = area.y + area.height - 1;
-        buf.set_string(area.x, y, &msg, style);
+        let y = pane_area.y + pane_area.height - 1;
+        buf.set_string(pane_area.x, y, &msg, style);
+    }
+
+    render_footer(buf, footer_area);
+}
+
+fn render_footer(buf: &mut Buffer, area: Rect) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    let bg_style = Style::default().fg(Color::White);
+    for x in area.x..area.x + area.width {
+        buf.set_string(x, area.y, " ", bg_style);
+    }
+
+    let key_style = Style::default()
+        .fg(Color::Gray)
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::Gray);
+
+    let hints: &[(&str, &str)] = &[
+        ("Ctrl+Q", "Quit"),
+        ("Alt+j/k", "Focus"),
+        ("Alt+n", "New"),
+        ("Alt+w", "Close"),
+        ("Alt+c", "Collapse"),
+        ("Ctrl+↑/↓", "Resize"),
+    ];
+
+    let mut x = area.x + 1;
+    for (key, desc) in hints {
+        if x + 2 >= area.x + area.width {
+            break;
+        }
+        buf.set_string(x, area.y, key, key_style);
+        x += key.chars().count() as u16;
+
+        let label = format!(" {}  ", desc);
+        let label_len = label.chars().count() as u16;
+        if x + label_len > area.x + area.width {
+            break;
+        }
+        buf.set_string(x, area.y, &label, desc_style);
+        x += label_len;
     }
 }
 
@@ -177,20 +235,27 @@ fn compute_visible_end(panes: &[Pane], start: usize, total_height: u16) -> usize
 
 fn render_pane(frame: &mut Frame, pane: &mut Pane, area: Rect, is_focused: bool) {
     let border_color = if is_focused {
-        Color::Gray
+        Color::Magenta
     } else {
         Color::DarkGray
     };
 
     let ty = area.y;
 
-    let toggle_style = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+    let toggle_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
     let name_style = if is_focused {
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::White)
+            .bg(Color::Magenta)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Gray)
     };
-    let close_style = Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD);
+    let close_style = Style::default()
+        .fg(Color::LightRed)
+        .add_modifier(Modifier::BOLD);
 
     let block = Block::default()
         .borders(Borders::ALL)
