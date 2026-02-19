@@ -1,5 +1,7 @@
 # bamboo
 
+![Bamboo](/bamboo.png)
+
 A terminal multiplexer TUI written in Rust. Run multiple terminal panes stacked vertically in a single window, with mouse support and TOML configuration.
 
 Why called bamboo? Because the vertical resembles the nodes of a shoot. 
