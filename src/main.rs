@@ -119,7 +119,7 @@ fn handle_worktree_cleanup(wt: &worktree::Worktree) {
 async fn main() -> Result<()> {
     let (config_path, worktree_flag) = parse_args();
 
-    // Create a git worktree when --worktree / -w is requested.
+    // Create a git worktree when --shoot / -s is requested.
     let active_worktree: Option<worktree::Worktree> = if let Some(name) = worktree_flag {
         let wt = worktree::Worktree::create(&name)?;
         eprintln!(
