@@ -15,10 +15,12 @@ pub struct AppState {
     pub default_shell: String,
     pub next_pane_id: usize,
     pub viewport_start: usize,
+    /// Name of the active shoot (git worktree), if any.
+    pub active_shoot: Option<String>,
 }
 
 impl AppState {
-    pub fn new(panes: Vec<Pane>, layout_mode: LayoutConfig, default_shell: String) -> Self {
+    pub fn new(panes: Vec<Pane>, layout_mode: LayoutConfig, default_shell: String, active_shoot: Option<String>) -> Self {
         let next_pane_id = panes.len();
 
         Self {
@@ -32,6 +34,7 @@ impl AppState {
             default_shell,
             next_pane_id,
             viewport_start: 0,
+            active_shoot,
         }
     }
 

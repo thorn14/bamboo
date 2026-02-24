@@ -60,10 +60,10 @@ pub fn render(frame: &mut Frame, app: &mut AppState) {
         buf.set_string(pane_area.x, y, &msg, style);
     }
 
-    render_footer(buf, footer_area);
+    render_footer(buf, footer_area, app.active_shoot.as_deref());
 }
 
-fn render_footer(buf: &mut Buffer, area: Rect) {
+fn render_footer(buf: &mut Buffer, area: Rect, active_shoot: Option<&str>) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -72,6 +72,23 @@ fn render_footer(buf: &mut Buffer, area: Rect) {
     for x in area.x..area.x + area.width {
         buf.set_string(x, area.y, " ", bg_style);
     }
+
+    // Right-aligned shoot badge rendered first so we know how much space it takes.
+    let shoot_badge_width = if let Some(name) = active_shoot {
+        let badge = format!(" 🎋 {} ", name);
+        let badge_len = badge.chars().count() as u16;
+        if area.width >= badge_len {
+            let badge_x = area.x + area.width - badge_len;
+            let shoot_style = Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD);
+            buf.set_string(badge_x, area.y, &badge, shoot_style);
+        }
+        badge_len
+    } else {
+        0
+    };
 
     let key_style = Style::default()
         .fg(Color::Gray)
@@ -87,9 +104,11 @@ fn render_footer(buf: &mut Buffer, area: Rect) {
         ("Ctrl+↑/↓", "Resize"),
     ];
 
+    let right_margin = shoot_badge_width + 1;
+    let usable_right = area.x + area.width.saturating_sub(right_margin);
     let mut x = area.x + 1;
     for (key, desc) in hints {
-        if x + 2 >= area.x + area.width {
+        if x + 2 >= usable_right {
             break;
         }
         buf.set_string(x, area.y, key, key_style);
@@ -97,7 +116,7 @@ fn render_footer(buf: &mut Buffer, area: Rect) {
 
         let label = format!(" {}  ", desc);
         let label_len = label.chars().count() as u16;
-        if x + label_len > area.x + area.width {
+        if x + label_len > usable_right {
             break;
         }
         buf.set_string(x, area.y, &label, desc_style);

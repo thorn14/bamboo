@@ -203,7 +203,8 @@ async fn main() -> Result<()> {
         }
     }
 
-    let mut app = AppState::new(panes, config.layout, config.default_shell);
+    let shoot_name = active_worktree.as_ref().map(|wt| wt.name.clone());
+    let mut app = AppState::new(panes, config.layout, config.default_shell, shoot_name);
     app.term_cols = size.width;
     app.term_rows = size.height;
 
