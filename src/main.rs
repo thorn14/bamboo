@@ -74,10 +74,10 @@ impl Drop for WorktreeGuard {
 
 /// Parse CLI arguments and return (config_path, worktree_name).
 ///
-/// `worktree_name`:
-///   - `None`        → no --worktree flag
-///   - `Some(name)`  → --worktree flag present; `name` is either the supplied
-///                     value or an auto-generated one
+/// `worktree_name` (from the `--shoot` / `-s` flag):
+///   - `None`        → no `--shoot` / `-s` flag
+///   - `Some(name)`  → `--shoot` / `-s` flag present; `name` is either the
+///                     supplied value or an auto-generated one
 fn parse_args() -> (Option<String>, Option<String>) {
     let args: Vec<String> = std::env::args().collect();
     let mut config_path: Option<String> = None;
@@ -156,7 +156,7 @@ async fn main() -> Result<()> {
 
     // Create a git worktree when --shoot / -s is requested. RAII guard cleans up
     // on error paths (best-effort remove or print path for manual cleanup).
-    let active_worktree = if let Some(name) = worktree_flag {
+    let active_worktree: Option<worktree::Worktree> = if let Some(name) = worktree_flag {
         let wt = worktree::Worktree::create(&name)?;
         eprintln!(
             "Created shoot '{}' at {}  (branch: {})",
