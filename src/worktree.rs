@@ -76,13 +76,9 @@ impl Worktree {
         }
 
         let output = Command::new("git")
-            .args([
-                "worktree",
-                "add",
-                worktree_dir.to_str().unwrap_or_default(),
-                "-b",
-                &branch,
-            ])
+            .args(["worktree", "add"])
+            .arg(&worktree_dir)
+            .args(["-b", &branch])
             .output()
             .context("Failed to run git worktree add")?;
 
