@@ -39,10 +39,10 @@ impl Drop for TerminalGuard {
 
 /// Parse CLI arguments and return (config_path, worktree_name).
 ///
-/// `worktree_name`:
-///   - `None`        → no --worktree flag
-///   - `Some(name)`  → --worktree flag present; `name` is either the supplied
-///                     value or an auto-generated one
+/// `worktree_name` (from the `--shoot` / `-s` flag):
+///   - `None`        → no `--shoot` / `-s` flag
+///   - `Some(name)`  → `--shoot` / `-s` flag present; `name` is either the
+///                     supplied value or an auto-generated one
 fn parse_args() -> (Option<String>, Option<String>) {
     let args: Vec<String> = std::env::args().collect();
     let mut config_path: Option<String> = None;
