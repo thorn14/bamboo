@@ -37,6 +37,41 @@ impl Drop for TerminalGuard {
     }
 }
 
+/// RAII guard that cleans up a created worktree on drop if it was not taken.
+/// On drop: remove silently when there are no changes; otherwise print path/branch
+/// for manual cleanup. The interactive prompt runs only when the guard is disarmed
+/// via `take()` on the normal shutdown path.
+struct WorktreeGuard(Option<worktree::Worktree>);
+
+impl WorktreeGuard {
+    fn get(&self) -> Option<&worktree::Worktree> {
+        self.0.as_ref()
+    }
+
+    /// Take the worktree out of the guard. Drop will then be a no-op.
+    fn take(&mut self) -> Option<worktree::Worktree> {
+        self.0.take()
+    }
+}
+
+impl Drop for WorktreeGuard {
+    fn drop(&mut self) {
+        if let Some(wt) = self.0.take() {
+            if wt.has_changes() {
+                eprintln!();
+                eprintln!(
+                    "Shoot '{}' was created but bamboo exited before cleanup (branch: {}).",
+                    wt.name, wt.branch
+                );
+                eprintln!("  Path: {}", wt.path.display());
+                eprintln!("  Remove manually if desired: git worktree remove --force \"{}\"", wt.path.display());
+            } else {
+                let _ = wt.remove();
+            }
+        }
+    }
+}
+
 /// Parse CLI arguments and return (config_path, worktree_name).
 ///
 /// `worktree_name`:
@@ -119,8 +154,9 @@ fn handle_worktree_cleanup(wt: &worktree::Worktree) {
 async fn main() -> Result<()> {
     let (config_path, worktree_flag) = parse_args();
 
-    // Create a git worktree when --worktree / -w is requested.
-    let active_worktree: Option<worktree::Worktree> = if let Some(name) = worktree_flag {
+    // Create a git worktree when --shoot / -s is requested. RAII guard cleans up
+    // on error paths (best-effort remove or print path for manual cleanup).
+    let active_worktree = if let Some(name) = worktree_flag {
         let wt = worktree::Worktree::create(&name)?;
         eprintln!(
             "Created shoot '{}' at {}  (branch: {})",
@@ -132,12 +168,13 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+    let mut worktree_guard = WorktreeGuard(active_worktree);
 
     let mut config = Config::load(config_path.as_deref())?;
 
     // When running inside a worktree, redirect every pane's working directory
     // to the worktree path so all shells/commands start there in isolation.
-    if let Some(wt) = &active_worktree {
+    if let Some(wt) = worktree_guard.get() {
         let wt_path = wt.path.to_string_lossy().to_string();
         for pane in &mut config.panes {
             pane.cwd = Some(wt_path.clone());
@@ -203,7 +240,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let shoot_name = active_worktree.as_ref().map(|wt| wt.name.clone());
+    let shoot_name = worktree_guard.get().map(|wt| wt.name.clone());
     let mut app = AppState::new(panes, config.layout, config.default_shell, shoot_name);
     app.term_cols = size.width;
     app.term_rows = size.height;
@@ -218,10 +255,10 @@ async fn main() -> Result<()> {
     let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture);
     let _ = stdout.flush();
 
-    // Handle worktree cleanup after the terminal is fully restored so the
-    // prompt and any output are readable.
-    if let Some(wt) = &active_worktree {
-        handle_worktree_cleanup(wt);
+    // Disarm the guard and run interactive cleanup after the terminal is fully
+    // restored so the prompt and any output are readable.
+    if let Some(wt) = worktree_guard.take() {
+        handle_worktree_cleanup(&wt);
     }
 
     std::process::exit(0);

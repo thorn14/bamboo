@@ -44,6 +44,28 @@ pub fn find_git_root() -> Result<PathBuf> {
     Ok(PathBuf::from(path))
 }
 
+/// Validates that `name` is safe for use in paths and branch names.
+/// Allows only [A-Za-z0-9._-], rejects path separators and "..".
+fn validate_worktree_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("Worktree name cannot be empty");
+    }
+    if name.contains("..") {
+        anyhow::bail!("Worktree name cannot contain '..'");
+    }
+    if name.contains(std::path::MAIN_SEPARATOR) || name.contains('/') {
+        anyhow::bail!("Worktree name cannot contain path separators");
+    }
+    let allowed = |c: char| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-';
+    if !name.chars().all(allowed) {
+        anyhow::bail!(
+            "Worktree name must be a safe slug (only A-Za-z0-9, ., _, - allowed), got: {:?}",
+            name
+        );
+    }
+    Ok(())
+}
+
 fn head_sha(dir: &PathBuf) -> Option<String> {
     Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -66,6 +88,7 @@ impl Worktree {
     /// Create a new git worktree at `<git_root>/.bamboo/worktrees/<name>` on a
     /// fresh branch `worktree-<name>`.
     pub fn create(name: &str) -> Result<Self> {
+        validate_worktree_name(name)?;
         let git_root = find_git_root()?;
         let worktree_dir = git_root.join(".bamboo").join("worktrees").join(name);
         let branch = format!("worktree-{}", name);
