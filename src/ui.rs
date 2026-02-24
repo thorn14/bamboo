@@ -306,112 +306,52 @@ fn render_pane(frame: &mut Frame, pane: &mut Pane, area: Rect, is_focused: bool)
         pane.resize(inner.width, inner.height);
     }
 
+    // Sync scroll_offset to the actual depth available in vt100's scrollback buffer
+    if pane.scroll_offset > 0 {
+        let mut parser = pane.parser.lock();
+        parser.screen_mut().set_scrollback(pane.scroll_offset);
+        pane.scroll_offset = parser.screen().scrollback();
+    }
+
     render_terminal_cells(buf, pane, inner);
 }
 
 fn render_terminal_cells(buf: &mut Buffer, pane: &Pane, area: Rect) {
-    let parser = pane.parser.lock();
+    let mut parser = pane.parser.lock();
+    parser.screen_mut().set_scrollback(pane.scroll_offset);
     let screen = parser.screen();
+    let (screen_rows, screen_cols) = screen.size();
 
-    if pane.scroll_offset == 0 {
-        let screen_rows = screen.size().0;
-        let screen_cols = screen.size().1;
-
-        for row in 0..area.height {
-            for col in 0..area.width {
-                if row >= screen_rows || col >= screen_cols {
-                    continue;
-                }
-                if let Some(cell) = screen.cell(row, col) {
-                    let ch = cell.contents();
-                    let fg = convert_color(cell.fgcolor());
-                    let bg = convert_color(cell.bgcolor());
-                    let mut style = Style::default().fg(fg).bg(bg);
-                    if cell.bold() {
-                        style = style.add_modifier(Modifier::BOLD);
-                    }
-                    if cell.italic() {
-                        style = style.add_modifier(Modifier::ITALIC);
-                    }
-                    if cell.underline() {
-                        style = style.add_modifier(Modifier::UNDERLINED);
-                    }
-
-                    let x = area.x + col;
-                    let y = area.y + row;
-                    if x < area.x + area.width && y < area.y + area.height {
-                        let display = if ch.is_empty() { " " } else { &ch };
-                        buf.set_string(x, y, display, style);
-                    }
-                }
+    for row in 0..area.height {
+        for col in 0..area.width {
+            if row >= screen_rows || col >= screen_cols {
+                continue;
             }
-        }
-    } else {
-        let scrollback_len = pane.scrollback.len();
-        let screen_rows = area.height as usize;
-
-        let total_rows = scrollback_len + pane.rows as usize;
-        let viewport_end = total_rows.saturating_sub(pane.scroll_offset);
-        let viewport_start = viewport_end.saturating_sub(screen_rows);
-
-        for (display_row, source_row) in (viewport_start..viewport_end).enumerate() {
-            if display_row >= area.height as usize {
-                break;
-            }
-
-            if source_row < scrollback_len {
-                let line = &pane.scrollback[source_row];
-                for (col, rcell) in line.iter().enumerate() {
-                    if col >= area.width as usize {
-                        break;
-                    }
-                    let fg = convert_color(rcell.fg);
-                    let bg = convert_color(rcell.bg);
-                    let mut style = Style::default().fg(fg).bg(bg);
-                    if rcell.bold {
-                        style = style.add_modifier(Modifier::BOLD);
-                    }
-                    if rcell.italic {
-                        style = style.add_modifier(Modifier::ITALIC);
-                    }
-                    if rcell.underline {
-                        style = style.add_modifier(Modifier::UNDERLINED);
-                    }
-                    let ch_str = String::from(rcell.ch);
-                    buf.set_string(
-                        area.x + col as u16,
-                        area.y + display_row as u16,
-                        &ch_str,
-                        style,
-                    );
+            if let Some(cell) = screen.cell(row, col) {
+                let ch = cell.contents();
+                let fg = convert_color(cell.fgcolor());
+                let bg = convert_color(cell.bgcolor());
+                let mut style = Style::default().fg(fg).bg(bg);
+                if cell.bold() {
+                    style = style.add_modifier(Modifier::BOLD);
                 }
-            } else {
-                let live_row = (source_row - scrollback_len) as u16;
-                let screen = parser.screen();
-                let screen_cols = screen.size().1;
-                for col in 0..area.width.min(screen_cols) {
-                    if let Some(cell) = screen.cell(live_row, col) {
-                        let ch = cell.contents();
-                        let fg = convert_color(cell.fgcolor());
-                        let bg = convert_color(cell.bgcolor());
-                        let mut style = Style::default().fg(fg).bg(bg);
-                        if cell.bold() {
-                            style = style.add_modifier(Modifier::BOLD);
-                        }
-                        if cell.italic() {
-                            style = style.add_modifier(Modifier::ITALIC);
-                        }
-                        if cell.underline() {
-                            style = style.add_modifier(Modifier::UNDERLINED);
-                        }
-                        let display = if ch.is_empty() { " " } else { &ch };
-                        buf.set_string(
-                            area.x + col,
-                            area.y + display_row as u16,
-                            display,
-                            style,
-                        );
-                    }
+                if cell.dim() {
+                    style = style.add_modifier(Modifier::DIM);
+                }
+                if cell.italic() {
+                    style = style.add_modifier(Modifier::ITALIC);
+                }
+                if cell.underline() {
+                    style = style.add_modifier(Modifier::UNDERLINED);
+                }
+                if cell.inverse() {
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
+                let x = area.x + col;
+                let y = area.y + row;
+                if x < area.x + area.width && y < area.y + area.height {
+                    let display = if ch.is_empty() { " " } else { &ch };
+                    buf.set_string(x, y, display, style);
                 }
             }
         }
@@ -446,11 +386,17 @@ fn render_last_terminal_line(buf: &mut Buffer, pane: &Pane, area: Rect) {
             if cell.bold() {
                 style = style.add_modifier(Modifier::BOLD);
             }
+            if cell.dim() {
+                style = style.add_modifier(Modifier::DIM);
+            }
             if cell.italic() {
                 style = style.add_modifier(Modifier::ITALIC);
             }
             if cell.underline() {
                 style = style.add_modifier(Modifier::UNDERLINED);
+            }
+            if cell.inverse() {
+                style = style.add_modifier(Modifier::REVERSED);
             }
             let display = if ch.is_empty() { " " } else { &ch };
             buf.set_string(area.x + col, area.y, display, style);
