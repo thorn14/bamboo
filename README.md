@@ -26,6 +26,9 @@ cargo build --release
 ```sh
 bamboo                        # uses default config lookup
 bamboo --config my.toml       # explicit config file
+bamboo --shoot                # create an isolated git worktree (auto-named)
+bamboo --shoot my-feature     # create a worktree named "my-feature"
+bamboo -s                     # shorthand for --shoot
 ```
 
 ## Keybindings
@@ -95,3 +98,33 @@ name = "Shell"
 ### Local override
 
 Drop a `.bamboo.toml` in any project directory to get a project-specific layout when you launch bamboo from there.
+
+## Shoots
+
+A **shoot** is an isolated git worktree spun up automatically when you pass `--shoot` / `-s`. It lets you work on a fresh branch without disturbing your main checkout.
+
+```sh
+bamboo --shoot            # auto-names the shoot (e.g. "swift-pine")
+bamboo --shoot my-feature # explicit name
+bamboo -s                 # shorthand
+```
+
+What happens:
+
+1. A new branch `worktree-<name>` is created from HEAD.
+2. A worktree is checked out at `<git-root>/.bamboo/worktrees/<name>`.
+3. Every pane's working directory is redirected to that path.
+4. The active shoot name is shown in the footer badge while bamboo is running.
+
+On exit bamboo checks for changes (uncommitted edits or new commits):
+
+- **No changes** — the worktree and branch are cleaned up silently.
+- **Changes present** — you are prompted to keep or remove the shoot.
+
+```
+Shoot 'swift-pine' has changes (branch: worktree-swift-pine).
+  Path: /your/repo/.bamboo/worktrees/swift-pine
+Keep shoot? [K]eep / [r]emove:
+```
+
+Shoots require a git repository in (or above) the current directory.
