@@ -4,6 +4,7 @@ mod events;
 mod pane;
 mod pty;
 mod ui;
+mod worktree;
 
 use std::io::{self, Write};
 
@@ -36,15 +37,112 @@ impl Drop for TerminalGuard {
     }
 }
 
+/// Parse CLI arguments and return (config_path, worktree_name).
+///
+/// `worktree_name`:
+///   - `None`        → no --worktree flag
+///   - `Some(name)`  → --worktree flag present; `name` is either the supplied
+///                     value or an auto-generated one
+fn parse_args() -> (Option<String>, Option<String>) {
+    let args: Vec<String> = std::env::args().collect();
+    let mut config_path: Option<String> = None;
+    let mut worktree_name: Option<String> = None;
+    let mut i = 1;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "--config" => {
+                if i + 1 < args.len() {
+                    config_path = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            "--worktree" | "-w" => {
+                // If the next argument exists and doesn't look like a flag, treat it
+                // as the worktree name; otherwise auto-generate one.
+                let name = if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                    let n = args[i + 1].clone();
+                    i += 2;
+                    n
+                } else {
+                    i += 1;
+                    worktree::random_name()
+                };
+                worktree_name = Some(name);
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    (config_path, worktree_name)
+}
+
+/// After the TUI exits, decide whether to keep or remove the worktree.
+fn handle_worktree_cleanup(wt: &worktree::Worktree) {
+    if wt.has_changes() {
+        println!();
+        println!(
+            "Worktree '{}' has changes (branch: {}).",
+            wt.name, wt.branch
+        );
+        println!("  Path: {}", wt.path.display());
+        print!("Keep worktree? [K]eep / [r]emove: ");
+        let _ = io::stdout().flush();
+
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_ok() {
+            let choice = input.trim().to_lowercase();
+            if choice == "r" || choice == "remove" {
+                match wt.remove() {
+                    Ok(()) => println!("Worktree removed."),
+                    Err(e) => eprintln!("Failed to remove worktree: {}", e),
+                }
+            } else {
+                println!("Worktree kept at: {}", wt.path.display());
+                println!("  Branch: {}", wt.branch);
+            }
+        }
+    } else {
+        // No changes — remove silently.
+        match wt.remove() {
+            Ok(()) => println!("Worktree '{}' cleaned up (no changes).", wt.name),
+            Err(e) => eprintln!("Warning: failed to remove worktree: {}", e),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let config_path = std::env::args()
-        .collect::<Vec<_>>()
-        .windows(2)
-        .find(|w| w[0] == "--config")
-        .map(|w| w[1].clone());
+    let (config_path, worktree_flag) = parse_args();
 
-    let config = Config::load(config_path.as_deref())?;
+    // Create a git worktree when --worktree / -w is requested.
+    let active_worktree: Option<worktree::Worktree> = if let Some(name) = worktree_flag {
+        let wt = worktree::Worktree::create(&name)?;
+        eprintln!(
+            "Created worktree '{}' at {}  (branch: {})",
+            wt.name,
+            wt.path.display(),
+            wt.branch
+        );
+        Some(wt)
+    } else {
+        None
+    };
+
+    let mut config = Config::load(config_path.as_deref())?;
+
+    // When running inside a worktree, redirect every pane's working directory
+    // to the worktree path so all shells/commands start there in isolation.
+    if let Some(wt) = &active_worktree {
+        let wt_path = wt.path.to_string_lossy().to_string();
+        for pane in &mut config.panes {
+            pane.cwd = Some(wt_path.clone());
+        }
+    }
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -118,5 +216,12 @@ async fn main() -> Result<()> {
     let mut stdout = io::stdout();
     let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture);
     let _ = stdout.flush();
+
+    // Handle worktree cleanup after the terminal is fully restored so the
+    // prompt and any output are readable.
+    if let Some(wt) = &active_worktree {
+        handle_worktree_cleanup(wt);
+    }
+
     std::process::exit(0);
 }
