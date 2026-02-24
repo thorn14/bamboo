@@ -254,9 +254,9 @@ fn compute_visible_end(panes: &[Pane], start: usize, total_height: u16) -> usize
 
 fn render_pane(frame: &mut Frame, pane: &mut Pane, area: Rect, is_focused: bool) {
     let border_color = if is_focused {
-        Color::Magenta
+        Color::Green
     } else {
-        Color::DarkGray
+        Color::Black
     };
 
     let ty = area.y;
