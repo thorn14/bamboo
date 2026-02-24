@@ -59,7 +59,7 @@ fn parse_args() -> (Option<String>, Option<String>) {
                     i += 1;
                 }
             }
-            "--worktree" | "-w" => {
+            "--shoot" | "-s" => {
                 // If the next argument exists and doesn't look like a flag, treat it
                 // as the worktree name; otherwise auto-generate one.
                 let name = if i + 1 < args.len() && !args[i + 1].starts_with('-') {
@@ -86,11 +86,11 @@ fn handle_worktree_cleanup(wt: &worktree::Worktree) {
     if wt.has_changes() {
         println!();
         println!(
-            "Worktree '{}' has changes (branch: {}).",
+            "Shoot '{}' has changes (branch: {}).",
             wt.name, wt.branch
         );
         println!("  Path: {}", wt.path.display());
-        print!("Keep worktree? [K]eep / [r]emove: ");
+        print!("Keep shoot? [K]eep / [r]emove: ");
         let _ = io::stdout().flush();
 
         let mut input = String::new();
@@ -98,19 +98,19 @@ fn handle_worktree_cleanup(wt: &worktree::Worktree) {
             let choice = input.trim().to_lowercase();
             if choice == "r" || choice == "remove" {
                 match wt.remove() {
-                    Ok(()) => println!("Worktree removed."),
-                    Err(e) => eprintln!("Failed to remove worktree: {}", e),
+                    Ok(()) => println!("Shoot removed."),
+                    Err(e) => eprintln!("Failed to remove shoot: {}", e),
                 }
             } else {
-                println!("Worktree kept at: {}", wt.path.display());
+                println!("Shoot kept at: {}", wt.path.display());
                 println!("  Branch: {}", wt.branch);
             }
         }
     } else {
         // No changes — remove silently.
         match wt.remove() {
-            Ok(()) => println!("Worktree '{}' cleaned up (no changes).", wt.name),
-            Err(e) => eprintln!("Warning: failed to remove worktree: {}", e),
+            Ok(()) => println!("Shoot '{}' cleaned up (no changes).", wt.name),
+            Err(e) => eprintln!("Warning: failed to remove shoot: {}", e),
         }
     }
 }
@@ -123,7 +123,7 @@ async fn main() -> Result<()> {
     let active_worktree: Option<worktree::Worktree> = if let Some(name) = worktree_flag {
         let wt = worktree::Worktree::create(&name)?;
         eprintln!(
-            "Created worktree '{}' at {}  (branch: {})",
+            "Created shoot '{}' at {}  (branch: {})",
             wt.name,
             wt.path.display(),
             wt.branch
