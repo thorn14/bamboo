@@ -5,7 +5,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
-use crate::app::AppState;
+use crate::app::{AppState, SelectionState};
 use crate::pane::Pane;
 
 const COLLAPSED_HEIGHT: u16 = 3;
@@ -41,10 +41,12 @@ pub fn render(frame: &mut Frame, app: &mut AppState) {
     app.last_pane_areas = layout.clone();
 
     let focused = app.focused;
+    let selection = app.selection.clone();
     for &(pane_idx, pa) in &layout {
         let is_focused = pane_idx == focused;
         let pane = &mut app.panes[pane_idx];
-        render_pane(frame, pane, pa, is_focused);
+        let pane_sel = selection.as_ref().filter(|s| s.pane_id == pane.id);
+        render_pane(frame, pane, pa, is_focused, pane_sel);
     }
 
     let buf = frame.buffer_mut();
@@ -61,10 +63,10 @@ pub fn render(frame: &mut Frame, app: &mut AppState) {
         buf.set_string(pane_area.x, y, &msg, style);
     }
 
-    render_footer(buf, footer_area, app.active_shoot.as_deref());
+    render_footer(buf, footer_area, app.active_shoot.as_deref(), app.selection.is_some());
 }
 
-fn render_footer(buf: &mut Buffer, area: Rect, active_shoot: Option<&str>) {
+fn render_footer(buf: &mut Buffer, area: Rect, active_shoot: Option<&str>, selection_active: bool) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -94,19 +96,32 @@ fn render_footer(buf: &mut Buffer, area: Rect, active_shoot: Option<&str>) {
         0
     };
 
-    let key_style = Style::default()
-        .fg(Color::Gray)
-        .add_modifier(Modifier::BOLD);
+    let key_style = if selection_active {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD)
+    };
     let desc_style = Style::default().fg(Color::Gray);
 
-    let hints: &[(&str, &str)] = &[
-        ("Ctrl+Q", "Quit"),
-        ("Alt+j/k", "Focus"),
-        ("Alt+n", "New"),
-        ("Alt+w", "Close"),
-        ("Alt+c", "Collapse"),
-        ("Ctrl+↑/↓", "Resize"),
-    ];
+    let hints: &[(&str, &str)] = if selection_active {
+        &[
+            ("SELECT", ""),
+            ("↑↓←→", "move"),
+            ("Enter/y", "copy"),
+            ("Esc", "cancel"),
+        ]
+    } else {
+        &[
+            ("Ctrl+Q", "Quit"),
+            ("Alt+j/k", "Focus"),
+            ("Alt+n", "New"),
+            ("Alt+w", "Close"),
+            ("Alt+c", "Collapse"),
+            ("Alt+v", "Paste"),
+            ("Alt+s", "Select"),
+            ("Ctrl+↑/↓", "Resize"),
+        ]
+    };
 
     let right_margin = shoot_badge_width + 1;
     let usable_right = area.x + area.width.saturating_sub(right_margin);
@@ -257,7 +272,7 @@ fn compute_visible_end(panes: &[Pane], start: usize, total_height: u16) -> usize
     end
 }
 
-fn render_pane(frame: &mut Frame, pane: &mut Pane, area: Rect, is_focused: bool) {
+fn render_pane(frame: &mut Frame, pane: &mut Pane, area: Rect, is_focused: bool, selection: Option<&SelectionState>) {
     let border_color = if is_focused {
         Color::Green
     } else {
@@ -297,6 +312,8 @@ fn render_pane(frame: &mut Frame, pane: &mut Pane, area: Rect, is_focused: bool)
     // Pane name + status
     let status = if pane.collapsed {
         pane.name.clone()
+    } else if let Some(sel) = selection.filter(|s| s.pane_id == pane.id) {
+        format!("{} [SEL {},{} → {},{}]", pane.name, sel.anchor.0, sel.anchor.1, sel.cursor.0, sel.cursor.1)
     } else if pane.scroll_offset > 0 {
         format!("{} [scroll: -{}]", pane.name, pane.scroll_offset)
     } else {
@@ -337,10 +354,10 @@ fn render_pane(frame: &mut Frame, pane: &mut Pane, area: Rect, is_focused: bool)
         pane.scroll_offset = parser.screen().scrollback();
     }
 
-    render_terminal_cells(buf, pane, inner);
+    render_terminal_cells(buf, pane, inner, selection);
 }
 
-fn render_terminal_cells(buf: &mut Buffer, pane: &Pane, area: Rect) {
+fn render_terminal_cells(buf: &mut Buffer, pane: &Pane, area: Rect, selection: Option<&SelectionState>) {
     let mut parser = pane.parser.lock();
     parser.screen_mut().set_scrollback(pane.scroll_offset);
     let screen = parser.screen();
@@ -371,6 +388,19 @@ fn render_terminal_cells(buf: &mut Buffer, pane: &Pane, area: Rect) {
                 if cell.inverse() {
                     style = style.add_modifier(Modifier::REVERSED);
                 }
+
+                // Selection highlighting
+                if let Some(sel) = selection {
+                    if sel.cursor == (row, col) {
+                        style = Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD);
+                    } else if sel.contains(row, col) {
+                        style = Style::default().fg(Color::White).bg(Color::Blue);
+                    }
+                }
+
                 let x = area.x + col;
                 let y = area.y + row;
                 if x < area.x + area.width && y < area.y + area.height {

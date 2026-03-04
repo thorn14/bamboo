@@ -113,6 +113,41 @@ fn handle_key_event(
         return;
     }
 
+    // Alt+S toggles selection mode
+    if alt && key.code == KeyCode::Char('s') {
+        if app.selection.is_some() {
+            app.clear_selection();
+        } else {
+            app.start_selection();
+        }
+        return;
+    }
+
+    // In selection mode: intercept all keys for navigation/copy/cancel
+    if app.selection.is_some() {
+        match key.code {
+            KeyCode::Up => app.move_selection_cursor(-1, 0),
+            KeyCode::Down => app.move_selection_cursor(1, 0),
+            KeyCode::Left => app.move_selection_cursor(0, -1),
+            KeyCode::Right => app.move_selection_cursor(0, 1),
+            KeyCode::Enter => {
+                if let Some(text) = app.selection_text() {
+                    copy_to_clipboard(&text);
+                }
+                app.clear_selection();
+            }
+            KeyCode::Char('y') if !alt && !ctrl => {
+                if let Some(text) = app.selection_text() {
+                    copy_to_clipboard(&text);
+                }
+                app.clear_selection();
+            }
+            KeyCode::Esc => app.clear_selection(),
+            _ => {}
+        }
+        return;
+    }
+
     if ctrl {
         match key.code {
             KeyCode::Up => {
@@ -149,6 +184,14 @@ fn handle_key_event(
                 app.toggle_collapse_focused();
                 return;
             }
+            KeyCode::Char('v') => {
+                if let Some(text) = paste_from_clipboard() {
+                    if let Some(pane) = app.focused_pane() {
+                        pane.write_input(text.as_bytes());
+                    }
+                }
+                return;
+            }
             _ => {}
         }
     }
@@ -157,6 +200,27 @@ fn handle_key_event(
         if let Some(pane) = app.focused_pane() {
             pane.write_input(&bytes);
         }
+    }
+}
+
+fn copy_to_clipboard(text: &str) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    if let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
+        if let Some(stdin) = child.stdin.as_mut() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        let _ = child.wait();
+    }
+}
+
+fn paste_from_clipboard() -> Option<String> {
+    use std::process::Command;
+    let output = Command::new("pbpaste").output().ok()?;
+    if output.status.success() {
+        String::from_utf8(output.stdout).ok()
+    } else {
+        None
     }
 }
 
@@ -217,11 +281,12 @@ fn spawn_new_pane(app: &mut AppState, unified_tx: &mpsc::UnboundedSender<AppEven
 }
 
 fn handle_mouse_event(mouse: MouseEvent, app: &mut AppState) {
+    let col = mouse.column;
+    let row = mouse.row;
+
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            let col = mouse.column;
-            let row = mouse.row;
-
+            app.last_mouse_pos = Some((row, col));
             // Click on "above" scroll indicator → page up
             if app.viewport_start > 0 && row == 0 {
                 app.page_viewport_up();
@@ -261,17 +326,72 @@ fn handle_mouse_event(mouse: MouseEvent, app: &mut AppState) {
                     }
 
                     app.focus(pane_idx);
+                    app.clear_selection();
                     return;
                 }
 
-                // Click in pane body
-                if col >= area.x
-                    && col < area.x + area.width
-                    && row > area.y
-                    && row < area.y + area.height
+                // Click in pane body (inside borders)
+                if col > area.x && col < area.x + area.width.saturating_sub(1)
+                    && row > area.y && row < area.y + area.height.saturating_sub(1)
                 {
                     app.focus(pane_idx);
+                    app.clear_selection();
                     return;
+                }
+
+                // Click on border (not title bar)
+                if col >= area.x && col < area.x + area.width
+                    && row >= area.y && row < area.y + area.height
+                {
+                    app.focus(pane_idx);
+                    app.clear_selection();
+                    return;
+                }
+            }
+            app.clear_selection();
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if app.selection.is_none() {
+                if let Some((start_row, start_col)) = app.last_mouse_pos {
+                    // Start selection if we've moved at least one cell
+                    if (start_row as i32 - row as i32).abs() > 0 || (start_col as i32 - col as i32).abs() > 0 {
+                        // Find which pane we're in
+                        let areas = app.last_pane_areas.clone();
+                        for &(pane_idx, area) in &areas {
+                            if start_col > area.x && start_col < area.x + area.width.saturating_sub(1)
+                                && start_row > area.y && start_row < area.y + area.height.saturating_sub(1)
+                            {
+                                let r = start_row - (area.y + 1);
+                                let c = start_col - (area.x + 1);
+                                app.start_selection_at(pane_idx, r, c);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(sel) = &app.selection {
+                if let Some(&(_idx, area)) = app.last_pane_areas.iter().find(|(idx, _)| app.panes[*idx].id == sel.pane_id) {
+                    let inner_w = area.width.saturating_sub(2);
+                    let inner_h = area.height.saturating_sub(2);
+                    if inner_w > 0 && inner_h > 0 {
+                        let r = row.saturating_sub(area.y + 1).min(inner_h - 1);
+                        let c = col.saturating_sub(area.x + 1).min(inner_w - 1);
+                        app.update_selection_at(r, c);
+                    }
+                }
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            app.last_mouse_pos = None;
+            if let Some(sel) = &app.selection {
+                if sel.anchor != sel.cursor {
+                    if let Some(text) = app.selection_text() {
+                        if !text.is_empty() {
+                            copy_to_clipboard(&text);
+                        }
+                    }
                 }
             }
         }
