@@ -56,19 +56,29 @@ impl Default for Config {
     }
 }
 
-/// Whether a config file was found or the wizard should be invoked.
+/// Whether a config file was found or the interactive wizard should be invoked.
+///
+/// `NeedsWizard` is returned only when *no* config file exists at any of the
+/// standard locations and no explicit `--config` path was supplied.  In
+/// non-TTY environments (CI, piped stdin) the caller should fall back to
+/// `Config::default()` rather than attempting to run the wizard.
 pub enum ConfigSource {
-    /// Config was loaded from an explicit path or an existing file.
+    /// Config was loaded from an explicit path or a discovered file.
     File(Config),
-    /// No local `.bamboo.toml` was found; the wizard should run.
+    /// No config file was found anywhere; the wizard should run (TTY only).
     NeedsWizard,
 }
 
 impl Config {
-    /// Load configuration, returning `ConfigSource::NeedsWizard` when no local
-    /// `.bamboo.toml` exists and no explicit path was supplied.  Global config
-    /// files still bypass the wizard so users who set up a global default are
-    /// not prompted on every new repo.
+    /// Look for a config file in priority order:
+    ///
+    /// 1. Explicit `--config <path>` flag
+    /// 2. `.bamboo.toml` in the current directory
+    /// 3. `~/.config/bamboo/config.toml` / `$XDG_CONFIG_HOME/bamboo/config.toml`
+    ///
+    /// Returns `ConfigSource::NeedsWizard` only when none of the above exist.
+    /// A global config therefore bypasses the wizard — users who have set one
+    /// up are not prompted on every new repo.
     pub fn load(path: Option<&str>) -> Result<ConfigSource> {
         // Explicit --config path always wins.
         if let Some(p) = path {
@@ -76,15 +86,24 @@ impl Config {
             return Self::read_file(&config_path).map(ConfigSource::File);
         }
 
-        // Local .bamboo.toml takes priority.
+        // Local .bamboo.toml takes next priority.
         let local = PathBuf::from(".bamboo.toml");
         if local.exists() {
             return Self::read_file(&local).map(ConfigSource::File);
         }
 
-        // No local config → ask the user to configure via wizard.
-        // (Global config is intentionally skipped here so every new repo gets
-        // its own .bamboo.toml rather than silently inheriting the global one.)
+        // Fall back to global config locations.  If one exists we use it
+        // directly without prompting — the wizard is only for repos that have
+        // no configuration anywhere.
+        let global_candidates = [
+            dirs::home_dir().map(|h| h.join(".config").join("bamboo").join("config.toml")),
+            dirs::config_dir().map(|d| d.join("bamboo").join("config.toml")),
+        ];
+        if let Some(global) = global_candidates.into_iter().flatten().find(|p| p.exists()) {
+            return Self::read_file(&global).map(ConfigSource::File);
+        }
+
+        // No config found anywhere → run the interactive wizard.
         Ok(ConfigSource::NeedsWizard)
     }
 
