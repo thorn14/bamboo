@@ -7,6 +7,7 @@ use ratatui::Frame;
 
 use crate::app::{AppState, SelectionState};
 use crate::pane::Pane;
+use crate::terminal;
 
 const COLLAPSED_HEIGHT: u16 = 3;
 const MIN_EXPANDED_HEIGHT: u16 = 5;
@@ -347,75 +348,72 @@ fn render_pane(frame: &mut Frame, pane: &mut Pane, area: Rect, is_focused: bool,
         pane.resize(inner.width, inner.height);
     }
 
-    // Sync scroll_offset to the actual depth available in vt100's scrollback buffer
-    if pane.scroll_offset > 0 {
-        let mut parser = pane.parser.lock();
-        parser.screen_mut().set_scrollback(pane.scroll_offset);
-        pane.scroll_offset = parser.screen().scrollback();
-    }
-
     render_terminal_cells(buf, pane, inner, selection);
 }
 
 fn render_terminal_cells(buf: &mut Buffer, pane: &Pane, area: Rect, selection: Option<&SelectionState>) {
-    let mut parser = pane.parser.lock();
-    parser.screen_mut().set_scrollback(pane.scroll_offset);
-    let screen = parser.screen();
-    let (screen_rows, screen_cols) = screen.size();
+    let term = pane.term.lock();
+    let screen_rows = terminal::screen_rows(&term);
+    let screen_cols = terminal::screen_cols(&term);
 
     for row in 0..area.height {
         for col in 0..area.width {
-            if row >= screen_rows || col >= screen_cols {
+            let r = row as usize;
+            let c = col as usize;
+            if r >= screen_rows || c >= screen_cols {
                 continue;
             }
-            if let Some(cell) = screen.cell(row, col) {
-                let ch = cell.contents();
-                let fg = convert_color(cell.fgcolor());
-                let bg = convert_color(cell.bgcolor());
-                let mut style = Style::default().fg(fg).bg(bg);
-                if cell.bold() {
-                    style = style.add_modifier(Modifier::BOLD);
-                }
-                if cell.dim() {
-                    style = style.add_modifier(Modifier::DIM);
-                }
-                if cell.italic() {
-                    style = style.add_modifier(Modifier::ITALIC);
-                }
-                if cell.underline() {
-                    style = style.add_modifier(Modifier::UNDERLINED);
-                }
-                if cell.inverse() {
-                    style = style.add_modifier(Modifier::REVERSED);
-                }
+            let info = terminal::cell_info(&term, r, c);
+            let fg = terminal::convert_color(info.fg);
+            let bg = terminal::convert_color(info.bg);
+            let mut style = Style::default().fg(fg).bg(bg);
+            if info.bold {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            if info.dim {
+                style = style.add_modifier(Modifier::DIM);
+            }
+            if info.italic {
+                style = style.add_modifier(Modifier::ITALIC);
+            }
+            if info.underline {
+                style = style.add_modifier(Modifier::UNDERLINED);
+            }
+            if info.inverse {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
 
-                // Selection highlighting
-                if let Some(sel) = selection {
-                    if sel.cursor == (row, col) {
-                        style = Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD);
-                    } else if sel.contains(row, col) {
-                        style = Style::default().fg(Color::White).bg(Color::Blue);
-                    }
+            // Selection highlighting
+            if let Some(sel) = selection {
+                if sel.cursor == (row, col) {
+                    style = Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD);
+                } else if sel.contains(row, col) {
+                    style = Style::default().fg(Color::White).bg(Color::Blue);
                 }
+            }
 
-                let x = area.x + col;
-                let y = area.y + row;
-                if x < area.x + area.width && y < area.y + area.height {
-                    let display = if ch.is_empty() { " " } else { &ch };
-                    buf.set_string(x, y, display, style);
-                }
+            let x = area.x + col;
+            let y = area.y + row;
+            if x < area.x + area.width && y < area.y + area.height {
+                let ch = info.ch;
+                let display = if ch == '\0' || ch == ' ' {
+                    " ".to_string()
+                } else {
+                    ch.to_string()
+                };
+                buf.set_string(x, y, &display, style);
             }
         }
     }
 }
 
 fn render_last_terminal_line(buf: &mut Buffer, pane: &Pane, area: Rect) {
-    let parser = pane.parser.lock();
-    let screen = parser.screen();
-    let (screen_rows, screen_cols) = screen.size();
+    let term = pane.term.lock();
+    let screen_rows = terminal::screen_rows(&term);
+    let screen_cols = terminal::screen_cols(&term);
     if screen_rows == 0 || screen_cols == 0 {
         return;
     }
@@ -424,62 +422,42 @@ fn render_last_terminal_line(buf: &mut Buffer, pane: &Pane, area: Rect) {
         .rev()
         .find(|&row| {
             (0..screen_cols).any(|col| {
-                screen.cell(row, col)
-                    .map(|c| !c.contents().is_empty())
-                    .unwrap_or(false)
+                let ch = terminal::cell_char(&term, row, col);
+                ch != ' ' && ch != '\0'
             })
         })
-        .unwrap_or_else(|| screen.cursor_position().0.min(screen_rows - 1));
+        .unwrap_or_else(|| {
+            let (cr, _) = terminal::cursor_position(&term);
+            cr.min(screen_rows - 1)
+        });
 
-    for col in 0..area.width.min(screen_cols) {
-        if let Some(cell) = screen.cell(target_row, col) {
-            let ch = cell.contents();
-            let fg = convert_color(cell.fgcolor());
-            let bg = convert_color(cell.bgcolor());
-            let mut style = Style::default().fg(fg).bg(bg);
-            if cell.bold() {
-                style = style.add_modifier(Modifier::BOLD);
-            }
-            if cell.dim() {
-                style = style.add_modifier(Modifier::DIM);
-            }
-            if cell.italic() {
-                style = style.add_modifier(Modifier::ITALIC);
-            }
-            if cell.underline() {
-                style = style.add_modifier(Modifier::UNDERLINED);
-            }
-            if cell.inverse() {
-                style = style.add_modifier(Modifier::REVERSED);
-            }
-            let display = if ch.is_empty() { " " } else { &ch };
-            buf.set_string(area.x + col, area.y, display, style);
+    for col in 0..area.width.min(screen_cols as u16) {
+        let c = col as usize;
+        let info = terminal::cell_info(&term, target_row, c);
+        let fg = terminal::convert_color(info.fg);
+        let bg = terminal::convert_color(info.bg);
+        let mut style = Style::default().fg(fg).bg(bg);
+        if info.bold {
+            style = style.add_modifier(Modifier::BOLD);
         }
-    }
-}
-
-fn convert_color(color: vt100::Color) -> Color {
-    match color {
-        vt100::Color::Default => Color::Reset,
-        vt100::Color::Idx(idx) => match idx {
-            0 => Color::Black,
-            1 => Color::Red,
-            2 => Color::Green,
-            3 => Color::Yellow,
-            4 => Color::Blue,
-            5 => Color::Magenta,
-            6 => Color::Cyan,
-            7 => Color::White,
-            8 => Color::DarkGray,
-            9 => Color::LightRed,
-            10 => Color::LightGreen,
-            11 => Color::LightYellow,
-            12 => Color::LightBlue,
-            13 => Color::LightMagenta,
-            14 => Color::LightCyan,
-            15 => Color::Gray,
-            n => Color::Indexed(n),
-        },
-        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+        if info.dim {
+            style = style.add_modifier(Modifier::DIM);
+        }
+        if info.italic {
+            style = style.add_modifier(Modifier::ITALIC);
+        }
+        if info.underline {
+            style = style.add_modifier(Modifier::UNDERLINED);
+        }
+        if info.inverse {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
+        let ch = info.ch;
+        let display = if ch == '\0' || ch == ' ' {
+            " ".to_string()
+        } else {
+            ch.to_string()
+        };
+        buf.set_string(area.x + col, area.y, &display, style);
     }
 }

@@ -1,16 +1,19 @@
+use alacritty_terminal::grid::Scroll;
+use alacritty_terminal::Term;
 use parking_lot::Mutex;
 use portable_pty::{MasterPty, PtySize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::pty::PtyEvent;
+use crate::terminal::{TermSize, VoidListener};
 
 pub struct Pane {
     pub id: usize,
     pub name: String,
     pub master: Box<dyn MasterPty + Send>,
     pub writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
-    pub parser: Arc<Mutex<vt100::Parser>>,
+    pub term: Arc<Mutex<Term<VoidListener>>>,
     pub pty_rx: Option<mpsc::UnboundedReceiver<PtyEvent>>,
     pub scroll_offset: usize,
     pub cols: u16,
@@ -26,7 +29,7 @@ impl Pane {
         name: String,
         master: Box<dyn MasterPty + Send>,
         writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
-        parser: Arc<Mutex<vt100::Parser>>,
+        term: Arc<Mutex<Term<VoidListener>>>,
         pty_rx: mpsc::UnboundedReceiver<PtyEvent>,
         cols: u16,
         rows: u16,
@@ -36,7 +39,7 @@ impl Pane {
             name,
             master,
             writer,
-            parser,
+            term,
             pty_rx: Some(pty_rx),
             scroll_offset: 0,
             cols,
@@ -62,11 +65,11 @@ impl Pane {
             pixel_height: 0,
         });
 
-        let mut parser = self.parser.lock();
-        let contents = parser.screen().contents_formatted();
-        let mut new_parser = vt100::Parser::new(rows, cols, 1000);
-        new_parser.process(&contents);
-        *parser = new_parser;
+        let size = TermSize {
+            cols: cols as usize,
+            rows: rows as usize,
+        };
+        self.term.lock().resize(size);
 
         self.cols = cols;
         self.rows = rows;
@@ -74,10 +77,19 @@ impl Pane {
 
     pub fn scroll_up(&mut self, lines: usize) {
         self.scroll_offset = self.scroll_offset.saturating_add(lines);
+        self.term.lock().scroll_display(Scroll::Delta(-(lines as i32)));
     }
 
     pub fn scroll_down(&mut self, lines: usize) {
+        if self.scroll_offset == 0 {
+            return;
+        }
         self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+        if self.scroll_offset == 0 {
+            self.term.lock().scroll_display(Scroll::Bottom);
+        } else {
+            self.term.lock().scroll_display(Scroll::Delta(lines as i32));
+        }
     }
 
     pub fn write_input(&self, data: &[u8]) {

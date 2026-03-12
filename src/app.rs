@@ -223,9 +223,7 @@ impl AppState {
     pub fn selection_text(&self) -> Option<String> {
         let sel = self.selection.as_ref()?;
         let pane = self.panes.iter().find(|p| p.id == sel.pane_id)?;
-        let mut parser = pane.parser.lock();
-        parser.screen_mut().set_scrollback(pane.scroll_offset);
-        let screen = parser.screen();
+        let term = pane.term.lock();
         let ((sr, sc), (er, ec)) = sel.normalized();
         let mut text = String::new();
         for row in sr..=er {
@@ -233,10 +231,8 @@ impl AppState {
             let end_col = if row == er { ec } else { pane.cols.saturating_sub(1) };
             let mut row_text = String::new();
             for col in start_col..=end_col {
-                if let Some(cell) = screen.cell(row, col) {
-                    let ch = cell.contents();
-                    row_text.push_str(if ch.is_empty() { " " } else { ch });
-                }
+                let ch = crate::terminal::cell_char(&term, row as usize, col as usize);
+                row_text.push(if ch == '\0' { ' ' } else { ch });
             }
             if !text.is_empty() {
                 text.push('\n');

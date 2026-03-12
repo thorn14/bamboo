@@ -244,19 +244,17 @@ fn spawn_new_pane(app: &mut AppState, unified_tx: &mpsc::UnboundedSender<AppEven
         Err(_) => return,
     };
 
-    let parser = std::sync::Arc::new(parking_lot::Mutex::new(vt100::Parser::new(
-        rows, cols, 1000,
-    )));
+    let term = crate::terminal::new_term(rows, cols, 1000);
 
     let (pty_tx, pty_rx) = mpsc::unbounded_channel::<PtyEvent>();
-    pty::launch_reader_task(spawned.reader, parser.clone(), pty_tx);
+    pty::launch_reader_task(spawned.reader, term.clone(), pty_tx);
 
     let pane = Pane::new(
         pane_id,
         name,
         spawned.master,
         spawned.writer,
-        parser,
+        term,
         pty_rx,
         cols,
         rows,
