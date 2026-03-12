@@ -398,13 +398,10 @@ fn render_terminal_cells(buf: &mut Buffer, pane: &Pane, area: Rect, selection: O
             let x = area.x + col;
             let y = area.y + row;
             if x < area.x + area.width && y < area.y + area.height {
-                let ch = info.ch;
-                let display = if ch == '\0' || ch == ' ' {
-                    " ".to_string()
-                } else {
-                    ch.to_string()
-                };
-                buf.set_string(x, y, &display, style);
+                let ch = if info.ch == '\0' { ' ' } else { info.ch };
+                let mut buf_utf8 = [0u8; 4];
+                let s = ch.encode_utf8(&mut buf_utf8);
+                buf.set_string(x, y, s, style);
             }
         }
     }
