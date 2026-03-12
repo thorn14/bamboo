@@ -5,6 +5,7 @@ mod pane;
 mod pty;
 mod terminal;
 mod ui;
+mod wizard;
 mod worktree;
 
 use std::io::{self, Write};
@@ -20,7 +21,7 @@ use ratatui::backend::CrosstermBackend;
 use tokio::sync::mpsc;
 
 use app::AppState;
-use config::Config;
+use config::{Config, ConfigSource};
 use events::{AppEvent, run_event_loop};
 use pane::Pane;
 use pty::{PtyEvent, launch_reader_task, spawn_pty};
@@ -171,7 +172,10 @@ async fn main() -> Result<()> {
     };
     let mut worktree_guard = WorktreeGuard(active_worktree);
 
-    let mut config = Config::load(config_path.as_deref())?;
+    let mut config = match Config::load(config_path.as_deref())? {
+        ConfigSource::File(c) => c,
+        ConfigSource::NeedsWizard => wizard::run_wizard()?,
+    };
 
     // When running inside a worktree, redirect every pane's working directory
     // to the worktree path so all shells/commands start there in isolation.

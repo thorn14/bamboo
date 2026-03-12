@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum LayoutConfig {
     Scroll,
@@ -16,16 +16,18 @@ impl Default for LayoutConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaneConfig {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_shell")]
     pub default_shell: String,
@@ -54,30 +56,59 @@ impl Default for Config {
     }
 }
 
+/// Whether a config file was found or the interactive wizard should be invoked.
+///
+/// `NeedsWizard` is returned only when *no* config file exists at any of the
+/// standard locations and no explicit `--config` path was supplied.  In
+/// non-TTY environments (CI, piped stdin) the caller should fall back to
+/// `Config::default()` rather than attempting to run the wizard.
+pub enum ConfigSource {
+    /// Config was loaded from an explicit path or a discovered file.
+    File(Config),
+    /// No config file was found anywhere; the wizard should run (TTY only).
+    NeedsWizard,
+}
+
 impl Config {
-    pub fn load(path: Option<&str>) -> Result<Self> {
-        let config_path = if let Some(p) = path {
-            Some(PathBuf::from(p))
-        } else {
-            // Priority: local .notebook-tui.toml > global config
-            let local = PathBuf::from(".bamboo.toml");
-            if local.exists() {
-                Some(local)
-            } else {
-                let candidates = [
-                    dirs::home_dir().map(|h| h.join(".config").join("bamboo").join("config.toml")),
-                    dirs::config_dir().map(|d| d.join("bamboo").join("config.toml")),
-                ];
-                candidates.into_iter().flatten().find(|p| p.exists())
-            }
-        };
+    /// Look for a config file in priority order:
+    ///
+    /// 1. Explicit `--config <path>` flag
+    /// 2. `.bamboo.toml` in the current directory
+    /// 3. `~/.config/bamboo/config.toml` / `$XDG_CONFIG_HOME/bamboo/config.toml`
+    ///
+    /// Returns `ConfigSource::NeedsWizard` only when none of the above exist.
+    /// A global config therefore bypasses the wizard — users who have set one
+    /// up are not prompted on every new repo.
+    pub fn load(path: Option<&str>) -> Result<ConfigSource> {
+        // Explicit --config path always wins.
+        if let Some(p) = path {
+            let config_path = PathBuf::from(p);
+            return Self::read_file(&config_path).map(ConfigSource::File);
+        }
 
-        let config_path = match config_path {
-            Some(p) if p.exists() => p,
-            _ => return Ok(Config::default()),
-        };
+        // Local .bamboo.toml takes next priority.
+        let local = PathBuf::from(".bamboo.toml");
+        if local.exists() {
+            return Self::read_file(&local).map(ConfigSource::File);
+        }
 
-        let contents = std::fs::read_to_string(&config_path)
+        // Fall back to global config locations.  If one exists we use it
+        // directly without prompting — the wizard is only for repos that have
+        // no configuration anywhere.
+        let global_candidates = [
+            dirs::home_dir().map(|h| h.join(".config").join("bamboo").join("config.toml")),
+            dirs::config_dir().map(|d| d.join("bamboo").join("config.toml")),
+        ];
+        if let Some(global) = global_candidates.into_iter().flatten().find(|p| p.exists()) {
+            return Self::read_file(&global).map(ConfigSource::File);
+        }
+
+        // No config found anywhere → run the interactive wizard.
+        Ok(ConfigSource::NeedsWizard)
+    }
+
+    fn read_file(config_path: &PathBuf) -> Result<Self> {
+        let contents = std::fs::read_to_string(config_path)
             .with_context(|| format!("Failed to read config from {}", config_path.display()))?;
 
         let mut config: Config =
