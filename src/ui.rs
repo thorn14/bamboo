@@ -398,10 +398,8 @@ fn render_terminal_cells(buf: &mut Buffer, pane: &Pane, area: Rect, selection: O
             let x = area.x + col;
             let y = area.y + row;
             if x < area.x + area.width && y < area.y + area.height {
-                let ch = if info.ch == '\0' { ' ' } else { info.ch };
-                let mut buf_utf8 = [0u8; 4];
-                let s = ch.encode_utf8(&mut buf_utf8);
-                buf.set_string(x, y, s, style);
+                let ch = if info.ch == "\0" { " ".to_string() } else { info.ch };
+                buf.set_string(x, y, &ch, style);
             }
         }
     }
@@ -420,7 +418,7 @@ fn render_last_terminal_line(buf: &mut Buffer, pane: &Pane, area: Rect) {
         .find(|&row| {
             (0..screen_cols).any(|col| {
                 let ch = terminal::cell_char(&term, row, col);
-                ch != ' ' && ch != '\0'
+                ch != " " && ch != "\0"
             })
         })
         .unwrap_or_else(|| {
@@ -449,13 +447,14 @@ fn render_last_terminal_line(buf: &mut Buffer, pane: &Pane, area: Rect) {
         if info.inverse {
             style = style.add_modifier(Modifier::REVERSED);
         }
-        let ch = if info.ch == '\0' || info.ch == ' ' {
-            ' '
+        let ch = if info.ch == "\0" || info.ch == " " {
+            " ".to_string()
         } else {
             info.ch
         };
-        let cell = buf.get_mut(area.x + col, area.y);
-        cell.set_char(ch);
-        cell.set_style(style);
+        if let Some(cell) = buf.cell_mut((area.x + col, area.y)) {
+            cell.set_symbol(&ch);
+            cell.set_style(style);
+        }
     }
 }

@@ -232,7 +232,11 @@ impl AppState {
             let mut row_text = String::new();
             for col in start_col..=end_col {
                 let ch = crate::terminal::cell_char(&term, row as usize, col as usize);
-                row_text.push(if ch == '\0' { ' ' } else { ch });
+                if ch == "\0" {
+                    row_text.push(' ');
+                } else {
+                    row_text.push_str(&ch);
+                }
             }
             if !text.is_empty() {
                 text.push('\n');

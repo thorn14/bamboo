@@ -62,23 +62,31 @@ pub fn process_bytes(
     processor.advance(term, bytes);
 }
 
-/// Get the character in a cell at the given (row, col) position.
+/// Get the full grapheme text in a cell at the given (row, col) position.
 /// Row 0 is the top of the visible viewport (accounting for display_offset/scrollback).
-pub fn cell_char(term: &Term<VoidListener>, row: usize, col: usize) -> char {
+pub fn cell_char(term: &Term<VoidListener>, row: usize, col: usize) -> String {
     use alacritty_terminal::index::{Column, Line};
     let grid = term.grid();
     let line = Line(row as i32);
     let column = Column(col);
     if row < term.screen_lines() && col < term.columns() {
-        grid[line][column].c
+        let cell = &grid[line][column];
+        let mut s = String::from(cell.c);
+        if let Some(zw) = cell.zerowidth() {
+            for &c in zw {
+                s.push(c);
+            }
+        }
+        s
     } else {
-        ' '
+        String::from(' ')
     }
 }
 
 /// Information about a single cell for rendering.
 pub struct CellInfo {
-    pub ch: char,
+    /// Full grapheme: base char + any zero-width combining codepoints.
+    pub ch: String,
     pub fg: AnsiColor,
     pub bg: AnsiColor,
     pub bold: bool,
@@ -98,8 +106,14 @@ pub fn cell_info(term: &Term<VoidListener>, row: usize, col: usize) -> CellInfo 
     let column = Column(col);
     if row < term.screen_lines() && col < term.columns() {
         let cell = &grid[line][column];
+        let mut ch = String::from(cell.c);
+        if let Some(zw) = cell.zerowidth() {
+            for &c in zw {
+                ch.push(c);
+            }
+        }
         CellInfo {
-            ch: cell.c,
+            ch,
             fg: cell.fg,
             bg: cell.bg,
             bold: cell.flags.contains(CellFlags::BOLD),
@@ -115,7 +129,7 @@ pub fn cell_info(term: &Term<VoidListener>, row: usize, col: usize) -> CellInfo 
         }
     } else {
         CellInfo {
-            ch: ' ',
+            ch: String::from(' '),
             fg: AnsiColor::Named(NamedColor::Foreground),
             bg: AnsiColor::Named(NamedColor::Background),
             bold: false,
