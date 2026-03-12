@@ -449,12 +449,13 @@ fn render_last_terminal_line(buf: &mut Buffer, pane: &Pane, area: Rect) {
         if info.inverse {
             style = style.add_modifier(Modifier::REVERSED);
         }
-        let ch = info.ch;
-        let display = if ch == '\0' || ch == ' ' {
-            " ".to_string()
+        let ch = if info.ch == '\0' || info.ch == ' ' {
+            ' '
         } else {
-            ch.to_string()
+            info.ch
         };
-        buf.set_string(area.x + col, area.y, &display, style);
+        let cell = buf.get_mut(area.x + col, area.y);
+        cell.set_char(ch);
+        cell.set_style(style);
     }
 }
