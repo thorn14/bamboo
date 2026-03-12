@@ -3,6 +3,7 @@ mod config;
 mod events;
 mod pane;
 mod pty;
+mod terminal;
 mod ui;
 mod worktree;
 
@@ -200,21 +201,17 @@ async fn main() -> Result<()> {
     for (i, pane_config) in config.panes.iter().enumerate() {
         let spawned = spawn_pty(pane_config, &config.default_shell, initial_cols, initial_rows)?;
 
-        let parser = std::sync::Arc::new(parking_lot::Mutex::new(vt100::Parser::new(
-            initial_rows,
-            initial_cols,
-            1000,
-        )));
+        let term = terminal::new_term(initial_rows, initial_cols, 1000);
 
         let (pty_tx, pty_rx) = mpsc::unbounded_channel::<PtyEvent>();
-        launch_reader_task(spawned.reader, parser.clone(), pty_tx);
+        launch_reader_task(spawned.reader, term.clone(), pty_tx);
 
         let pane = Pane::new(
             i,
             pane_config.name.clone(),
             spawned.master,
             spawned.writer,
-            parser,
+            term,
             pty_rx,
             initial_cols,
             initial_rows,

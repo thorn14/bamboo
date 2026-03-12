@@ -1,3 +1,4 @@
+use alacritty_terminal::Term;
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -6,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::config::{Config, PaneConfig};
+use crate::terminal::VoidListener;
 
 #[derive(Debug)]
 pub enum PtyEvent {
@@ -80,10 +82,11 @@ pub fn spawn_pty(
 
 pub fn launch_reader_task(
     mut reader: Box<dyn Read + Send>,
-    parser: Arc<Mutex<vt100::Parser>>,
+    term: Arc<Mutex<Term<VoidListener>>>,
     tx: mpsc::UnboundedSender<PtyEvent>,
 ) {
     tokio::task::spawn_blocking(move || {
+        let mut processor = crate::terminal::new_processor();
         let mut buf = [0u8; 4096];
         loop {
             match reader.read(&mut buf) {
@@ -93,7 +96,10 @@ pub fn launch_reader_task(
                 }
                 Ok(n) => {
                     let bytes = buf[..n].to_vec();
-                    parser.lock().process(&bytes);
+                    {
+                        let mut term = term.lock();
+                        crate::terminal::process_bytes(&mut term, &mut processor, &bytes);
+                    }
                     if tx.send(PtyEvent::Data(bytes)).is_err() {
                         break;
                     }

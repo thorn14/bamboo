@@ -7,7 +7,7 @@ edition = "2021"
 ratatui   = { version = "0.30", features = ["crossterm"] }
 crossterm = "0.28"
 portable-pty = "0.9"
-vt100     = "0.16"
+alacritty_terminal = "0.25"
 tokio     = { version = "1", features = ["full"] }
 serde     = { version = "1", features = ["derive"] }
 toml      = "0.8"
