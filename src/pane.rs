@@ -76,20 +76,29 @@ impl Pane {
     }
 
     pub fn scroll_up(&mut self, lines: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_add(lines);
-        self.term.lock().scroll_display(Scroll::Delta(-(lines as i32)));
+        let mut term = self.term.lock();
+        term.scroll_display(Scroll::Delta(-(lines as i32)));
+        self.scroll_offset = term.display_offset();
     }
 
     pub fn scroll_down(&mut self, lines: usize) {
-        if self.scroll_offset == 0 {
+        let mut term = self.term.lock();
+
+        let current_offset = term.display_offset();
+        if current_offset == 0 {
+            // Already at the bottom; nothing to do.
+            self.scroll_offset = 0;
             return;
         }
-        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
-        if self.scroll_offset == 0 {
-            self.term.lock().scroll_display(Scroll::Bottom);
+
+        if lines >= current_offset {
+            // Scrolling past the bottom; just jump to the bottom.
+            term.scroll_display(Scroll::Bottom);
         } else {
-            self.term.lock().scroll_display(Scroll::Delta(lines as i32));
+            term.scroll_display(Scroll::Delta(lines as i32));
         }
+
+        self.scroll_offset = term.display_offset();
     }
 
     pub fn write_input(&self, data: &[u8]) {
