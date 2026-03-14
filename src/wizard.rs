@@ -5,6 +5,17 @@ use anyhow::Result;
 
 use crate::config::{Config, LayoutConfig, PaneConfig};
 
+// ANSI color/style constants for terminal output.
+const RESET: &str = "\x1b[0m";
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+const CYAN: &str = "\x1b[36m";
+const GREEN: &str = "\x1b[32m";
+const YELLOW: &str = "\x1b[33m";
+const BOLD_CYAN: &str = "\x1b[1;36m";
+const BOLD_GREEN: &str = "\x1b[1;32m";
+const BOLD_YELLOW: &str = "\x1b[1;33m";
+
 /// Run the interactive setup wizard and return the resulting `Config`.
 ///
 /// Returns `Config::default()` without prompting when stdin is not a TTY
@@ -17,13 +28,21 @@ pub fn run_wizard() -> Result<Config> {
     let stdout = io::stdout();
     let mut out = stdout.lock();
 
-    writeln!(out, "\nNo .bamboo.toml found for this repo. Let's set it up.")?;
+    writeln!(out)?;
+    writeln!(
+        out,
+        "{BOLD_CYAN}No .bamboo.toml found for this repo. Let's set it up.{RESET}"
+    )?;
+    writeln!(out, "{DIM}─────────────────────────────────────────────{RESET}")?;
     writeln!(out)?;
 
     // --- Shell ---
     let default_shell =
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let shell = prompt(&mut out, &format!("Shell [{}]", default_shell))?;
+    let shell = prompt(
+        &mut out,
+        &format!("{BOLD_YELLOW}Shell{RESET} {DIM}[{default_shell}]{RESET}"),
+    )?;
     let shell = if shell.is_empty() {
         default_shell
     } else {
@@ -31,7 +50,10 @@ pub fn run_wizard() -> Result<Config> {
     };
 
     // --- Layout ---
-    let layout_input = prompt(&mut out, "Layout (Scroll/Fixed) [Scroll]")?;
+    let layout_input = prompt(
+        &mut out,
+        &format!("{BOLD_YELLOW}Layout{RESET} {DIM}(Scroll/Fixed){RESET} {DIM}[Scroll]{RESET}"),
+    )?;
     let layout = match layout_input.to_lowercase().as_str() {
         "fixed" => LayoutConfig::Fixed,
         _ => LayoutConfig::Scroll,
@@ -39,7 +61,10 @@ pub fn run_wizard() -> Result<Config> {
 
     // --- Panes ---
     writeln!(out)?;
-    writeln!(out, "Add panes (leave name blank to finish):")?;
+    writeln!(
+        out,
+        "{BOLD_CYAN}Add panes{RESET} {DIM}(leave name blank to finish):{RESET}"
+    )?;
 
     let mut panes: Vec<PaneConfig> = Vec::new();
     let mut idx = 1usize;
@@ -47,9 +72,9 @@ pub fn run_wizard() -> Result<Config> {
     loop {
         let default_name = if idx == 1 { "Shell".to_string() } else { String::new() };
         let name_hint = if default_name.is_empty() {
-            format!("  Pane {} name (blank to finish)", idx)
+            format!("  {BOLD_YELLOW}Pane {idx} name{RESET} {DIM}(blank to finish){RESET}")
         } else {
-            format!("  Pane {} name [{}]", idx, default_name)
+            format!("  {BOLD_YELLOW}Pane {idx} name{RESET} {DIM}[{default_name}]{RESET}")
         };
 
         let name_input = prompt(&mut out, &name_hint)?;
@@ -65,7 +90,7 @@ pub fn run_wizard() -> Result<Config> {
 
         let command_input = prompt(
             &mut out,
-            &format!("  Pane {} command (blank for interactive shell)", idx),
+            &format!("  {CYAN}Pane {idx} command{RESET} {DIM}(blank for interactive shell){RESET}"),
         )?;
         let command = if command_input.is_empty() {
             None
@@ -75,7 +100,7 @@ pub fn run_wizard() -> Result<Config> {
 
         let cwd_input = prompt(
             &mut out,
-            &format!("  Pane {} cwd (blank for current directory)", idx),
+            &format!("  {CYAN}Pane {idx} cwd{RESET} {DIM}(blank for current directory){RESET}"),
         )?;
         let cwd = if cwd_input.is_empty() {
             None
@@ -112,12 +137,19 @@ pub fn run_wizard() -> Result<Config> {
 
     // --- Save prompt ---
     writeln!(out)?;
-    let save = prompt(&mut out, "Save config to .bamboo.toml? [Y/n]")?;
+    writeln!(out, "{DIM}─────────────────────────────────────────────{RESET}")?;
+    let save = prompt(
+        &mut out,
+        &format!("{BOLD}Save config to .bamboo.toml?{RESET} {DIM}[Y/n]{RESET}"),
+    )?;
     if save.is_empty() || save.to_lowercase().starts_with('y') {
         write_config(&config)?;
-        writeln!(out, "Saved .bamboo.toml")?;
+        writeln!(out, "{BOLD_GREEN}Saved .bamboo.toml{RESET}")?;
     } else {
-        writeln!(out, "Skipped saving — config applies to this session only.")?;
+        writeln!(
+            out,
+            "{YELLOW}Skipped saving — config applies to this session only.{RESET}"
+        )?;
     }
 
     writeln!(out)?;
@@ -126,7 +158,7 @@ pub fn run_wizard() -> Result<Config> {
 }
 
 fn prompt(out: &mut impl Write, label: &str) -> Result<String> {
-    write!(out, "{}: ", label)?;
+    write!(out, "{}{BOLD}{GREEN}>{RESET} ", label)?;
     out.flush()?;
 
     let mut input = String::new();
